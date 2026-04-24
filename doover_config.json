@@ -1,200 +1,342 @@
 {
-    "sample_application": {
-        "key": "32134bbb-5278-43c0-a6ca-4046a5edeb9f",
-        "name": "sample_application",
-        "display_name": "Sample Application",
-        "type": "DEV",
+    "tag_relay": {
+        "name": "tag_relay",
+        "display_name": "Tag Relay",
+        "type": "PRO",
         "visibility": "PUB",
         "allow_many": true,
-        "description": "A template application for Doover",
+        "description": "Relays tag values between apps, with optional CEL transforms and per-mapping UI.",
         "long_description": "README.md",
         "depends_on": [],
-        "owner_org_key": "",
-        "image_name": "ghcr.io/getdoover/app-template:main",
-        "container_registry_profile_key": "",
-        "build_args": "--platform linux/amd64,linux/arm64",
+        "handler": "src.tag_relay.handler",
+        "lambda_config": {
+            "Runtime": "python3.13",
+            "Timeout": 300,
+            "MemorySize": 128,
+            "Handler": "src.tag_relay.handler"
+        },
         "config_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$id": "",
             "title": "$default",
             "type": "object",
             "properties": {
-                "digital_outputs_enabled": {
-                    "title": "Digital Outputs Enabled",
-                    "x-name": "digital_outputs_enabled",
+                "dv_proc_subscriptions": {
+                    "title": "Subscription",
+                    "x-name": "dv_proc_subscriptions",
                     "x-hidden": false,
                     "type": [
-                        "boolean",
+                        "array",
                         "null"
                     ],
                     "x-required": false,
-                    "default": true,
-                    "x-position": 0
+                    "description": "A list of channels to subscribe to.",
+                    "default": [
+                        "tag_values",
+                        "ui_cmds"
+                    ],
+                    "x-position": 0,
+                    "items": {
+                        "title": "Channel Subscription",
+                        "x-name": "dv_proc_subscription",
+                        "x-hidden": false,
+                        "type": "string",
+                        "x-required": true,
+                        "description": "The name of the channel to subscribe to"
+                    }
                 },
-                "a_funny_message": {
-                    "title": "A Funny Message",
-                    "x-name": "a_funny_message",
+                "dv_proc_schedules": {
+                    "title": "Schedule",
+                    "x-name": "dv_proc_schedules",
                     "x-hidden": false,
-                    "type": "string",
-                    "x-required": true,
+                    "format": "doover-schedule",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Optional cron/rate schedule. Only needed if at least one mapping uses trigger=schedule. Leave disabled otherwise.",
+                    "default": null,
                     "x-position": 1
                 },
-                "simulator_app_key": {
-                    "title": "Simulator App Key",
-                    "x-name": "simulator_app_key",
+                "mappings": {
+                    "title": "Mappings",
+                    "x-name": "mappings",
                     "x-hidden": false,
-                    "format": "doover-resource-application",
-                    "type": "string",
-                    "x-required": true,
-                    "description": "The app key for the simulator",
-                    "x-position": 2
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "One entry per source-to-destination tag relay.",
+                    "default": [],
+                    "x-position": 2,
+                    "items": {
+                        "title": "Mapping",
+                        "x-name": "mapping",
+                        "x-hidden": false,
+                        "type": "object",
+                        "x-required": true,
+                        "properties": {
+                            "source_app": {
+                                "title": "Source App",
+                                "x-name": "source_app",
+                                "x-hidden": false,
+                                "format": "doover-application",
+                                "type": "string",
+                                "x-required": true,
+                                "description": "App on this agent whose tag is being relayed.",
+                                "x-position": 1
+                            },
+                            "source_tag": {
+                                "title": "Source Tag",
+                                "x-name": "source_tag",
+                                "x-hidden": false,
+                                "type": "string",
+                                "x-required": true,
+                                "description": "Name of the tag on the source app.",
+                                "x-position": 2
+                            },
+                            "destination_app": {
+                                "title": "Destination App",
+                                "x-name": "destination_app",
+                                "x-hidden": false,
+                                "format": "doover-application",
+                                "type": "string",
+                                "x-required": true,
+                                "description": "App on this agent to write the relayed value into.",
+                                "x-position": 3
+                            },
+                            "destination_tag": {
+                                "title": "Destination Tag",
+                                "x-name": "destination_tag",
+                                "x-hidden": false,
+                                "type": "string",
+                                "x-required": true,
+                                "description": "Name of the tag to write on the destination app.",
+                                "x-position": 4
+                            },
+                            "transform_cel": {
+                                "title": "Transform (CEL)",
+                                "x-name": "transform_cel",
+                                "x-hidden": false,
+                                "type": [
+                                    "string",
+                                    "null"
+                                ],
+                                "x-required": false,
+                                "description": "Optional Common Expression Language expression applied to the source value. The input is bound as `x`. Examples: `x * 1.8 + 32`, `double(x) / 1000.0`, `x > 10`.",
+                                "default": null,
+                                "x-position": 5
+                            },
+                            "trigger": {
+                                "enum": [
+                                    "event",
+                                    "schedule"
+                                ],
+                                "title": "Trigger",
+                                "x-name": "trigger",
+                                "x-hidden": false,
+                                "type": [
+                                    "string",
+                                    "null"
+                                ],
+                                "x-required": false,
+                                "description": "`event` (default): relay whenever the source tag changes. `schedule`: relay only on the processor's scheduled runs \u2014 requires the top-level schedule to be configured.",
+                                "default": "event",
+                                "x-position": 6
+                            },
+                            "ui": {
+                                "title": "UI",
+                                "x-name": "ui",
+                                "x-hidden": false,
+                                "type": "object",
+                                "x-required": true,
+                                "x-position": 7,
+                                "properties": {
+                                    "show_on_tag_relay_ui": {
+                                        "title": "Show on Tag Relay UI",
+                                        "x-name": "show_on_tag_relay_ui",
+                                        "x-hidden": false,
+                                        "type": [
+                                            "boolean",
+                                            "null"
+                                        ],
+                                        "x-required": false,
+                                        "description": "If on, surface the relayed value as a variable on the Tag Relay app's UI.",
+                                        "default": false,
+                                        "x-position": 1
+                                    },
+                                    "display_name": {
+                                        "title": "Display Name",
+                                        "x-name": "display_name",
+                                        "x-hidden": false,
+                                        "type": [
+                                            "string",
+                                            "null"
+                                        ],
+                                        "x-required": false,
+                                        "description": "Label shown on the UI.",
+                                        "default": null,
+                                        "x-position": 2
+                                    },
+                                    "variable_type": {
+                                        "enum": [
+                                            "numeric",
+                                            "boolean",
+                                            "text"
+                                        ],
+                                        "title": "Variable Type",
+                                        "x-name": "variable_type",
+                                        "x-hidden": false,
+                                        "type": [
+                                            "string",
+                                            "null"
+                                        ],
+                                        "x-required": false,
+                                        "default": "numeric",
+                                        "x-position": 3
+                                    },
+                                    "units": {
+                                        "title": "Units",
+                                        "x-name": "units",
+                                        "x-hidden": false,
+                                        "type": [
+                                            "string",
+                                            "null"
+                                        ],
+                                        "x-required": false,
+                                        "description": "Units suffix (numeric only).",
+                                        "default": null,
+                                        "x-position": 4
+                                    },
+                                    "decimal_precision": {
+                                        "title": "Decimal Precision",
+                                        "x-name": "decimal_precision",
+                                        "x-hidden": false,
+                                        "type": [
+                                            "integer",
+                                            "null"
+                                        ],
+                                        "x-required": false,
+                                        "description": "Number of decimal places to show (numeric only).",
+                                        "default": null,
+                                        "x-position": 5,
+                                        "minimum": 0
+                                    },
+                                    "ranges": {
+                                        "title": "Ranges",
+                                        "x-name": "ranges",
+                                        "x-hidden": false,
+                                        "type": "array",
+                                        "x-required": true,
+                                        "description": "Optional coloured ranges (numeric only).",
+                                        "x-position": 6,
+                                        "items": {
+                                            "title": "Range",
+                                            "x-name": "range",
+                                            "x-hidden": false,
+                                            "type": "object",
+                                            "x-required": true,
+                                            "properties": {
+                                                "label": {
+                                                    "title": "Label",
+                                                    "x-name": "label",
+                                                    "x-hidden": false,
+                                                    "type": "string",
+                                                    "x-required": true,
+                                                    "x-position": 1
+                                                },
+                                                "min": {
+                                                    "title": "Min",
+                                                    "x-name": "min",
+                                                    "x-hidden": false,
+                                                    "type": "number",
+                                                    "x-required": true,
+                                                    "x-position": 2
+                                                },
+                                                "max": {
+                                                    "title": "Max",
+                                                    "x-name": "max",
+                                                    "x-hidden": false,
+                                                    "type": "number",
+                                                    "x-required": true,
+                                                    "x-position": 3
+                                                },
+                                                "colour": {
+                                                    "enum": [
+                                                        "red",
+                                                        "yellow",
+                                                        "green",
+                                                        "blue",
+                                                        "grey",
+                                                        "black"
+                                                    ],
+                                                    "title": "Colour",
+                                                    "x-name": "colour",
+                                                    "x-hidden": false,
+                                                    "type": [
+                                                        "string",
+                                                        "null"
+                                                    ],
+                                                    "x-required": false,
+                                                    "default": "grey",
+                                                    "x-position": 4
+                                                }
+                                            },
+                                            "additionalElements": true,
+                                            "required": [
+                                                "label",
+                                                "min",
+                                                "max"
+                                            ],
+                                            "x-collapsible": true,
+                                            "x-defaultCollapsed": false
+                                        }
+                                    },
+                                    "form_control": {
+                                        "enum": [
+                                            "none",
+                                            "float_input",
+                                            "text_input",
+                                            "boolean"
+                                        ],
+                                        "title": "Form Control",
+                                        "x-name": "form_control",
+                                        "x-hidden": false,
+                                        "type": [
+                                            "string",
+                                            "null"
+                                        ],
+                                        "x-required": false,
+                                        "description": "Optional write-back control. When set, user input is written directly to the destination tag (bypassing the CEL transform).",
+                                        "default": "none",
+                                        "x-position": 7
+                                    }
+                                },
+                                "additionalElements": true,
+                                "required": [
+                                    "ranges"
+                                ],
+                                "x-collapsible": true,
+                                "x-defaultCollapsed": false
+                            }
+                        },
+                        "additionalElements": true,
+                        "required": [
+                            "source_app",
+                            "source_tag",
+                            "destination_app",
+                            "destination_tag",
+                            "ui"
+                        ],
+                        "x-collapsible": true,
+                        "x-defaultCollapsed": false
+                    }
                 }
             },
             "additionalElements": true,
-            "required": [
-                "a_funny_message",
-                "simulator_app_key"
-            ]
-        },
-        "ui_schema": {
-            "displayString": "$config.app().APP_DISPLAY_NAME",
-            "hidden": "$config.app().hidden:boolean:false:boolean:false",
-            "position": "$config.app().dv_app_position:number:100",
-            "icon": null,
-            "colour": null,
-            "defaultOpen": false,
-            "type": "uiApplication",
-            "name": "$config.app().APP_KEY",
-            "children": {
-                "is_working": {
-                    "name": "is_working",
-                    "type": "uiVariable",
-                    "displayString": "We Working?",
-                    "showActivity": true,
-                    "position": 51,
-                    "hidden": false,
-                    "varType": "bool",
-                    "currentValue": "$tag.app().is_working:boolean:false"
-                },
-                "uptime": {
-                    "name": "uptime",
-                    "type": "uiVariable",
-                    "displayString": "Uptime",
-                    "showActivity": true,
-                    "position": 52,
-                    "hidden": false,
-                    "varType": "float",
-                    "currentValue": "$tag.app().uptime:number:0"
-                },
-                "send_alert": {
-                    "name": "send_alert",
-                    "type": "uiButton",
-                    "displayString": "Send message as alert",
-                    "position": 1,
-                    "hidden": false,
-                    "currentValue": "$cmds.app().send_alert",
-                    "appKey": "$config.app().APP_KEY"
-                },
-                "test_message": {
-                    "name": "test_message",
-                    "type": "uiTextInput",
-                    "displayString": "Put in a message",
-                    "position": 54,
-                    "hidden": false,
-                    "currentValue": "$cmds.app().test_message",
-                    "appKey": "$config.app().APP_KEY",
-                    "isTextArea": false
-                },
-                "test_output": {
-                    "name": "test_output",
-                    "type": "uiVariable",
-                    "displayString": "This is message we got",
-                    "showActivity": true,
-                    "position": 55,
-                    "hidden": false,
-                    "varType": "string",
-                    "currentValue": "$tag.app().test_output:string:\"\""
-                },
-                "battery": {
-                    "name": "battery",
-                    "type": "uiSubmodule",
-                    "displayString": "Battery Module",
-                    "showActivity": true,
-                    "position": 59,
-                    "hidden": false,
-                    "children": {
-                        "voltage": {
-                            "name": "voltage",
-                            "type": "uiVariable",
-                            "displayString": "Battery Voltage",
-                            "showActivity": true,
-                            "position": 56,
-                            "hidden": false,
-                            "varType": "float",
-                            "currentValue": "$tag.app().battery_voltage:number:0",
-                            "decPrecision": 2,
-                            "ranges": [
-                                {
-                                    "min": 0,
-                                    "max": 10,
-                                    "colour": "red",
-                                    "show_on_graph": true,
-                                    "label": "Low"
-                                },
-                                {
-                                    "min": 10,
-                                    "max": 20,
-                                    "colour": "green",
-                                    "show_on_graph": true,
-                                    "label": "Normal"
-                                },
-                                {
-                                    "min": 20,
-                                    "max": 30,
-                                    "colour": "blue",
-                                    "show_on_graph": true,
-                                    "label": "High"
-                                }
-                            ]
-                        },
-                        "low_voltage_alert": {
-                            "name": "low_voltage_alert",
-                            "type": "uiFloatInput",
-                            "displayString": "Low Voltage Alert",
-                            "position": 57,
-                            "hidden": false,
-                            "currentValue": "$cmds.app().low_voltage_alert",
-                            "appKey": "$config.app().APP_KEY"
-                        },
-                        "charge_mode": {
-                            "name": "charge_mode",
-                            "type": "uiSelect",
-                            "displayString": "Charge Mode",
-                            "position": 58,
-                            "hidden": false,
-                            "currentValue": "$cmds.app().charge_mode",
-                            "appKey": "$config.app().APP_KEY",
-                            "options": {
-                                "charge": {
-                                    "name": "charge",
-                                    "displayString": "Charge",
-                                    "type": "uiElement"
-                                },
-                                "discharge": {
-                                    "name": "discharge",
-                                    "displayString": "Discharge",
-                                    "type": "uiElement"
-                                },
-                                "idle": {
-                                    "name": "idle",
-                                    "displayString": "Idle",
-                                    "type": "uiElement"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            "required": []
         }
     }
 }

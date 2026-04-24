@@ -1,61 +1,84 @@
-# Doover App Template
+# Tag Relay
 
-A template for building device applications on the Doover IoT platform using pydoover 1.0.
+A Doover **cloud processor** (`type: PRO`) that relays tag values between apps
+on a single agent. Each mapping reads a source tag, optionally applies a CEL
+transform, and writes the result to a destination tag. Optional per-mapping
+UI surfaces the relayed value on the Tag Relay's own app card.
+
+Cross-agent relay is on the roadmap but not yet implemented — v1 is
+same-agent only.
 
 ## Commands
 
 ```bash
-uv run pytest tests -v          # Run tests
-uv run export-config             # Write config_schema into doover_config.json
-uv run export-ui                 # Write ui_schema into doover_config.json (required to publish)
-doover app run                   # Run app + simulator locally via docker-compose
+uv run pytest tests -v       # Run smoke tests
+uv run export-config         # Rewrite config_schema in doover_config.json
 ```
 
-## Project Structure
+There is no `export-ui` — the UI is built dynamically from config at runtime.
+
+## Project structure
 
 ```
-src/app_template/
-  __init__.py        # Entry point — run_app(SampleApplication())
-  application.py     # Main app class (setup, main_loop, UI handlers)
-  app_config.py      # Config schema — class-level declarations
-  app_tags.py        # Runtime state tags — bound to UI elements
-  app_ui.py          # UI definition — subclasses ui.UI
-  app_state.py       # State machine using pydoover.state.StateMachine
-simulators/sample/   # Simulator app that produces test data
-tests/               # pytest suite
+src/tag_relay/
+  __init__.py       # Lambda handler entry (src.tag_relay.handler)
+  app_config.py     # TagRelayConfig + MappingObject + UIConfig + RangeObject
+  application.py    # TagRelayApplication — filters, on_aggregate_update, on_schedule, writeback handler
+  app_ui.py         # TagRelayUI — dynamic UI builder (overrides UI.setup)
+  names.py          # Deterministic mirror/writeback/variable name helpers
+  transforms.py     # TransformCache — compile-once CEL evaluation
+tests/
 ```
 
-## pydoover 1.0 Patterns
+No Dockerfile: processors are Lambda-zipped, not containerised.
 
-This app uses the pydoover 1.0 declarative API. Key patterns:
+## pydoover 1.0 processor patterns
 
-### Application class (application.py)
-- Set `config_cls`, `tags_cls`, `ui_cls` as class attributes — framework wires them up automatically
-- Override `async def setup()` for init and `async def main_loop()` for the periodic loop
-- Use `@ui.handler("element_name")` for UI interaction callbacks (signature: `self, ctx, value`)
-- Access config via `self.config.<field>.value`, tags via `self.tags.<name>.set(val)` / `.get()`
-- Cross-app tags: `self.get_tag("tag_name", app_key)`
-- Messaging: `await self.create_message(channel, {data})`
+- `pydoover.processor.Application` (via `pydoover.processor.run_app`) — not
+  `pydoover.docker.Application`. The Lambda handler calls `run_app(app, event,
+  context)`.
+- Class-level declarative config: subclass `config.Schema`, and for nested
+  objects subclass `config.Object` (e.g. `MappingObject`, `UIConfig`).
+- `@ui.handler(re.compile(r"..."))` accepts regex patterns — used here to
+  dispatch per-mapping write-back commands from the UI.
+- Dynamic UI: override `ui.UI.setup` and call `self.add_element(...)`. This
+  sets `is_static = False`, which makes the processor republish the UI
+  schema on every invocation.
+- Cross-app tag access: `self.tag_manager.get_tag(tag_name, app_key=...)` and
+  `self.tag_manager.set_tag(tag_name, value, app_key=...)`.
+- Loop guard: the processor base rejects `tag_values` events whose diff
+  contains the processor's own `app_key`, so mirror writes on self don't
+  re-trigger the relay.
 
-### Config (app_config.py)
-- Subclass `config.Schema` with class-level `config.Boolean`, `config.String`, `config.Application`, etc.
-- `export()` is a classmethod: `SampleConfig.export(path, name)`
+## UI surface model (why mirror tags exist)
 
-### Tags (app_tags.py)
-- Subclass `Tags` with class-level `Tag("type", default=...)` declarations
-- Types: "boolean", "number", "integer", "string", "array", "object"
+Tags live on the `tag_values` channel aggregate, keyed by `app_key`:
+`{app_key: {tag_name: value}}`. UI `currentValue` expressions use
+`$tag.app().<name>` — which resolves against the publishing app's own subtree.
+There's no supported expression syntax for `$tag.app(<other_key>).<name>`.
 
-### UI (app_ui.py)
-- Subclass `ui.UI` with class-level element declarations
-- Bind variables to tags: `ui.NumericVariable("Label", value=MyTags.field, name="id")`
-- Element types: `BooleanVariable`, `NumericVariable`, `TextVariable`, `Button`, `TextInput`, `FloatInput`, `Select`, `Submodule`
-- Use explicit `name=` kwarg on interactive elements to match handler names
+So Tag Relay writes *two* tag values per relay:
+1. **Authoritative** — to the destination app_key (this is the actual relay).
+2. **Mirror** — to the Tag Relay's own app_key under a deterministic
+   `mirror_<slug>` key, used solely as the UI binding target.
 
-### State Machine (app_state.py)
-- Uses `pydoover.state.StateMachine` (wraps the `transitions` library)
-- Define `states` and `transitions` as class attributes, `on_enter_<state>()` callbacks
+`names.py` is the single source of truth for how slugs are derived
+(`sha1(f"{dest_app}/{dest_tag}")[:8]`). Mirror tags, writeback command names,
+and UI variable names all share that slug.
 
-## Doover Skills
+## Filters
 
-If you have the doover-skills plugin installed, use `/doover` to see all available skills.
-Key skills: `/doover-device-apps` for device app development, `/pydoover` for API reference.
+- `pre_hook_filter` — rejects events that aren't `tag_values` aggregate
+  updates, `ui_cmds`/`dv-rpc` message creates, or schedule/manual events.
+- `post_setup_filter` — for `tag_values` events, additionally requires that at
+  least one event-mode mapping's source tag appears in the diff. This avoids
+  running the body when the event is unrelated to any configured mapping.
+
+## Gotchas
+
+- **CEL int/float strictness**: `x * 1.8` fails when `x` is int. Use
+  `double(x) * 1.8`. Transform errors surface as `TransformError` and are
+  logged; the mapping is skipped, others continue.
+- Top-level `dv_proc_schedules` is the only schedule the platform honours —
+  there is no per-mapping cron. Mappings mark themselves `trigger=schedule`
+  to opt in to the shared schedule; otherwise they fire on event.

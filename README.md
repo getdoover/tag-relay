@@ -1,85 +1,124 @@
-
-# Doover App Template
+# Tag Relay
 
 <img src="https://doover.com/wp-content/uploads/Doover-Logo-Landscape-Navy-padded-small.png" alt="App Icon" style="max-width: 300px;">
 
-**A ready template for a Doover Application**
+**A Doover processor that relays tag values between apps on a device — with
+optional CEL transforms and per-mapping UI.**
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/getdoover/app-template/blob/main/LICENSE)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/getdoover/app-template?quickstart=1)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-[Getting Started](#-getting-started) • [Configuration](#configuration) • [Developer](https://github.com/getdoover/app-template/blob/main/DEVELOPMENT.md) • [Need Help?](#need-help)
-
-<br/>
-
-## 📖 Overview
-
-A ready-to-use template for building Doover applications. This template provides the essential
-structure and configuration needed to quickly get started with app development on the Doover
-platform, using [pydoover](https://github.com/getdoover/pydoover) 1.0.
-
-Use this repository as a starting point: fork it (or use the "Use this template" button),
-rename the `app_template` package, and replace the sample config, tags, UI, and state machine
-with your own.
+[Overview](#overview) · [Configuration](#configuration) · [UI](#ui) ·
+[Triggers](#triggers) · [Transforms](#transforms) · [Developer](DEVELOPMENT.md)
 
 <br/>
 
-## 🚀 Getting Started
+## Overview
 
-### How to Use
+Tag Relay is a cloud processor (`type: PRO`). One instance, configured with a
+list of *mappings*. Each mapping describes one flow:
 
-#### Quick Start Guide
+```
+<source_app>.<source_tag>  ──[optional CEL transform]──▶  <dest_app>.<dest_tag>
+```
 
-Click the **Open in GitHub Codespaces** badge above to launch a ready-to-go development environment with:
-- Python 3.13, uv, and all project dependencies
-- Doover CLI (`doover`) pre-installed — you'll be prompted to log in on first open
-- Claude Code with [doover-skills](https://github.com/getdoover/doover-skills) pre-configured
+Everything is scoped to a single agent: the processor reads tags from one app
+on the agent and writes them to another app on the same agent. (Cross-agent
+relay is on the roadmap — v1 is same-agent only.)
 
-> **Claude Code:** You'll be prompted for your `ANTHROPIC_API_KEY` when creating a Codespace.
-> Get a key at [console.anthropic.com](https://console.anthropic.com/settings/keys).
-> To skip this prompt in future, save it as a permanent secret at
-> [github.com/settings/codespaces](https://github.com/settings/codespaces).
-
-This Doover App can be managed via the Doover CLI, and installed quickly onto devices through the Doover platform.
-
-### Configuration
-
-Configuration fields are declared in [`src/app_template/app_config.py`](src/app_template/app_config.py).
-The sample schema ships with:
-
-| Setting | Description | Default |
-|---------|-------------|---------|
-| **Digital Outputs Enabled** | Toggle whether the app drives digital outputs | `true` |
-| **A Funny Message** | Free-text message used by the sample alert button | *(required)* |
-| **Simulator App Key** | App key of the simulator supplying `random_value` | *(required)* |
-
-Replace these with your own fields, then regenerate `doover_config.json` with `uv run export-config`.
+By default, every mapping fires on source tag change. Mappings can opt into
+scheduled relays instead (via the top-level schedule and `trigger=schedule`).
 
 <br/>
 
-## 🔗 Integrations
+## Configuration
 
-### Tags
+| Field | Purpose |
+|-------|---------|
+| **Subscriptions** | Pre-set to `tag_values` and `ui_cmds`. Don't usually change. |
+| **Schedule** | Cron/rate schedule. Only needed if any mapping uses `trigger=schedule`. |
+| **Mappings** | Array — one entry per relay. |
 
-The sample app publishes a few example tags via [`src/app_template/app_tags.py`](src/app_template/app_tags.py):
+Each **Mapping**:
 
-| Tag | Description |
-|-----|-------------|
-| **is_working** | Heartbeat — `true` while the main loop is running |
-| **uptime** | Seconds since the app started |
-| **battery_voltage** | Example numeric value sourced from the simulator |
-| **test_output** | Echoes text entered in the UI |
+| Field | Purpose |
+|-------|---------|
+| **Source App** | Installed app whose tag is being relayed. |
+| **Source Tag** | Tag name on the source app. |
+| **Destination App** | Installed app to write into. |
+| **Destination Tag** | Tag name to write on the destination. |
+| **Transform (CEL)** | Optional. Expression applied to the source value (bound as `x`). |
+| **Trigger** | `event` (default) or `schedule`. |
+| **UI** | Optional — surface the relayed value as a variable on the Tag Relay UI. |
 
 <br/>
 
-### Need Help?
+## Transforms
 
-- 📧 Email: support@doover.com
-- 📖 [Doover Documentation](https://docs.doover.com)
-- 👨‍💻 [App Developer Documentation](https://github.com/getdoover/app-template/blob/main/DEVELOPMENT.md)
+Transforms are [CEL (Common Expression Language)](https://github.com/google/cel-spec)
+expressions. The source value is bound as `x`; the expression result is written
+to the destination.
+
+Examples:
+
+```
+x                          # identity (equivalent to leaving transform empty)
+x * 1000                   # scale
+double(x) * 1.8 + 32       # Celsius → Fahrenheit
+x > 10                     # threshold to boolean
+int(x / 100)               # truncating division
+```
+
+**Gotcha:** CEL is strict about mixed int/float arithmetic. If `x` arrives as
+an int and the expression has a float literal, cast with `double(x)` first.
+Transform errors are logged and the mapping is skipped — other mappings in the
+same run continue.
 
 <br/>
 
-## 📄 License
+## Triggers
 
-This app is licensed under the [Apache License 2.0](https://github.com/getdoover/app-template/blob/main/LICENSE).
+- **`event`** (default) — the processor subscribes to the `tag_values` channel.
+  When the source tag changes, the mapping runs immediately.
+- **`schedule`** — the mapping is skipped on change events and runs only when
+  the top-level **Schedule** fires. Useful for throttling noisy sources or
+  periodic snapshot relays.
+
+<br/>
+
+## UI
+
+Each mapping can opt in to a UI card on the Tag Relay app:
+
+- Numeric, boolean, or text variable types
+- Numeric variables support decimal precision, units, and coloured ranges
+- Optional write-back control (`float_input`, `text_input`, `boolean`) — user
+  input is written **directly** to the destination tag, bypassing the CEL
+  transform (since transforms are one-way source→dest)
+
+The UI is rendered on the Tag Relay's own app card, not injected into the
+destination app's card. It references a mirror tag that the processor writes
+to its own app subtree on each relay.
+
+<br/>
+
+## Commands
+
+```bash
+uv run pytest tests -v       # Run tests
+uv run export-config         # Rewrite config_schema in doover_config.json
+doover app publish --profile dv2   # Publish after schema changes
+```
+
+<br/>
+
+## Need Help?
+
+- Email: support@doover.com
+- [Doover Documentation](https://docs.doover.com)
+- [Developer Documentation](DEVELOPMENT.md)
+
+<br/>
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
