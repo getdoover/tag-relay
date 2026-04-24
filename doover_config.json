@@ -13,8 +13,12 @@
             "Runtime": "python3.13",
             "Timeout": 300,
             "MemorySize": 128,
-            "Handler": "src.tag_relay.handler"
+            "Handler": "src.tag_relay.handler",
+            "Architectures": [
+                "arm64"
+            ]
         },
+        "export_ui_command": "NO_EXPORT",
         "config_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$id": "",
@@ -32,8 +36,7 @@
                     "x-required": false,
                     "description": "A list of channels to subscribe to.",
                     "default": [
-                        "tag_values",
-                        "ui_cmds"
+                        "tag_values"
                     ],
                     "x-position": 0,
                     "items": {
@@ -102,9 +105,13 @@
                                 "x-name": "destination_app",
                                 "x-hidden": false,
                                 "format": "doover-application",
-                                "type": "string",
-                                "x-required": true,
-                                "description": "App on this agent to write the relayed value into.",
+                                "type": [
+                                    "string",
+                                    "null"
+                                ],
+                                "x-required": false,
+                                "description": "App on this agent to write the relayed value into. Leave blank to write into this Tag Relay app itself.",
+                                "default": null,
                                 "x-position": 3
                             },
                             "destination_tag": {
@@ -125,7 +132,7 @@
                                     "null"
                                 ],
                                 "x-required": false,
-                                "description": "Optional Common Expression Language expression applied to the source value. The input is bound as `x`. Examples: `x * 1.8 + 32`, `double(x) / 1000.0`, `x > 10`.",
+                                "description": "Optional Common Expression Language expression applied to the source value before writing. The input is bound as `x`; the expression result becomes the destination value.\n\nCommon linear transform (y = m*x + b): `x * 0.5 + 10` scales by 0.5 and adds a 10 offset.\n\nMore examples: `x * 1000` (unit scale, int), `x * 1.8 + 32` (Celsius -> Fahrenheit), `x > 10` (threshold to boolean), `int(x / 100)` (truncate). Whenever you include a decimal point anywhere in the expression (e.g. `0.5`, `1.8`), integer inputs and integer literals are auto-promoted to double \u2014 no need for explicit casts in typical linear transforms.",
                                 "default": null,
                                 "x-position": 5
                             },
@@ -294,22 +301,21 @@
                                             "x-defaultCollapsed": false
                                         }
                                     },
-                                    "form_control": {
+                                    "gauge": {
                                         "enum": [
                                             "none",
-                                            "float_input",
-                                            "text_input",
-                                            "boolean"
+                                            "linear",
+                                            "radial"
                                         ],
-                                        "title": "Form Control",
-                                        "x-name": "form_control",
+                                        "title": "Gauge",
+                                        "x-name": "gauge",
                                         "x-hidden": false,
                                         "type": [
                                             "string",
                                             "null"
                                         ],
                                         "x-required": false,
-                                        "description": "Optional write-back control. When set, user input is written directly to the destination tag (bypassing the CEL transform).",
+                                        "description": "Render the numeric variable as a linear or radial gauge instead of a plain value. Numeric variables only; ignored for boolean/text.",
                                         "default": "none",
                                         "x-position": 7
                                     }
@@ -326,7 +332,6 @@
                         "required": [
                             "source_app",
                             "source_tag",
-                            "destination_app",
                             "destination_tag",
                             "ui"
                         ],
@@ -337,6 +342,23 @@
             },
             "additionalElements": true,
             "required": []
-        }
+        },
+        "organisation_id": null,
+        "container_registry_profile_id": null,
+        "id": 173325583319566346,
+        "key": null,
+        "owner_org_id": null,
+        "code_repo_id": null,
+        "repo_branch": "main",
+        "build_args": null,
+        "image_name": null,
+        "ui_schema": null,
+        "icon_url": null,
+        "banner_url": null,
+        "staging_config": {},
+        "build_widget_command": null,
+        "export_config_command": null,
+        "run_command": null,
+        "lambda_arn": null
     }
 }

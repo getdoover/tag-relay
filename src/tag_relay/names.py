@@ -18,9 +18,5 @@ def mirror_key_for(dest_app_key: str, dest_tag_name: str) -> str:
     return f"mirror_{_slug(dest_app_key, dest_tag_name)}"
 
 
-def writeback_name_for(dest_app_key: str, dest_tag_name: str) -> str:
-    return f"wb_{_slug(dest_app_key, dest_tag_name)}"
-
-
 def variable_name_for(dest_app_key: str, dest_tag_name: str) -> str:
     return f"var_{_slug(dest_app_key, dest_tag_name)}"

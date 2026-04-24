@@ -11,8 +11,14 @@ from __future__ import annotations
 from pydoover import ui
 from pydoover.ui.declarative import UITagBinding
 
-from .names import mirror_key_for, variable_name_for, writeback_name_for
-from .validation import partition_mappings
+from .names import mirror_key_for, variable_name_for
+from .validation import endpoints, partition_mappings
+
+
+_GAUGE_WIDGET = {
+    "linear": ui.Widget.linear,
+    "radial": ui.Widget.radial,
+}
 
 
 def _tag_type_for_variable(variable_type: str) -> str:
@@ -26,14 +32,13 @@ def _tag_type_for_variable(variable_type: str) -> str:
 class TagRelayUI(ui.UI):
     async def setup(self):
         # Skip invalid mappings silently — Application.setup logs the reject.
-        valid, _ = partition_mappings(self.config.mappings.elements)
+        valid, _ = partition_mappings(self.config.mappings.elements, self.app_key)
         for mapping in valid:
             ui_cfg = mapping.ui
             if not ui_cfg.enabled.value:
                 continue
 
-            dest_app = mapping.dest_app_key.value
-            dest_tag = mapping.dest_tag_name.value
+            _src, (dest_app, dest_tag) = endpoints(mapping, self.app_key)
 
             variable_type = ui_cfg.variable_type.value or "numeric"
             display_name = ui_cfg.display_name.value or f"{dest_app}.{dest_tag}"
@@ -50,15 +55,6 @@ class TagRelayUI(ui.UI):
             )
             if element is not None:
                 self.add_element(element)
-
-            control = self._build_form_control(
-                ui_cfg.form_control.value,
-                display_name,
-                dest_app,
-                dest_tag,
-            )
-            if control is not None:
-                self.add_element(control)
 
     def _build_variable(self, variable_type, display_name, name, binding, ui_cfg):
         if variable_type == "boolean":
@@ -80,22 +76,10 @@ class TagRelayUI(ui.UI):
         ranges = _build_ranges(ui_cfg.ranges)
         if ranges:
             kwargs["ranges"] = ranges
+        gauge = _GAUGE_WIDGET.get(ui_cfg.gauge_type.value)
+        if gauge is not None:
+            kwargs["form"] = gauge
         return ui.NumericVariable(display_name, **kwargs)
-
-    def _build_form_control(self, form_control, display_name, dest_app, dest_tag):
-        if not form_control or form_control == "none":
-            return None
-
-        name = writeback_name_for(dest_app, dest_tag)
-        label = f"Set {display_name}"
-
-        if form_control == "float_input":
-            return ui.FloatInput(label, name=name)
-        if form_control == "text_input":
-            return ui.TextInput(label, name=name)
-        if form_control == "boolean":
-            return ui.BooleanParameter(name=name, display_name=label)
-        return None
 
 
 def _build_ranges(ranges_array):

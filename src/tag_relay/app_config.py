@@ -47,12 +47,12 @@ class UIConfig(config.Object):
         element=RangeObject("Range"),
         description="Optional coloured ranges (numeric only).",
     )
-    form_control = config.Enum(
-        "Form Control",
-        choices=["none", "float_input", "text_input", "boolean"],
+    gauge_type = config.Enum(
+        "Gauge",
+        choices=["none", "linear", "radial"],
         description=(
-            "Optional write-back control. When set, user input is written "
-            "directly to the destination tag (bypassing the CEL transform)."
+            "Render the numeric variable as a linear or radial gauge instead of "
+            "a plain value. Numeric variables only; ignored for boolean/text."
         ),
         default="none",
     )
@@ -69,7 +69,11 @@ class MappingObject(config.Object):
     )
     dest_app_key = config.ApplicationInstall(
         "Destination App",
-        description="App on this agent to write the relayed value into.",
+        description=(
+            "App on this agent to write the relayed value into. "
+            "Leave blank to write into this Tag Relay app itself."
+        ),
+        default=None,
     )
     dest_tag_name = config.String(
         "Destination Tag",
@@ -79,8 +83,17 @@ class MappingObject(config.Object):
         "Transform (CEL)",
         description=(
             "Optional Common Expression Language expression applied to the "
-            "source value. The input is bound as `x`. Examples: "
-            "`x * 1.8 + 32`, `double(x) / 1000.0`, `x > 10`."
+            "source value before writing. The input is bound as `x`; the "
+            "expression result becomes the destination value.\n\n"
+            "Common linear transform (y = m*x + b): `x * 0.5 + 10` scales "
+            "by 0.5 and adds a 10 offset.\n\n"
+            "More examples: `x * 1000` (unit scale, int), "
+            "`x * 1.8 + 32` (Celsius -> Fahrenheit), "
+            "`x > 10` (threshold to boolean), `int(x / 100)` (truncate). "
+            "Whenever you include a decimal point anywhere in the "
+            "expression (e.g. `0.5`, `1.8`), integer inputs and integer "
+            "literals are auto-promoted to double — no need for explicit "
+            "casts in typical linear transforms."
         ),
         default=None,
     )
@@ -98,7 +111,7 @@ class MappingObject(config.Object):
 
 
 class TagRelayConfig(config.Schema):
-    subscriptions = ManySubscriptionConfig(default=["tag_values", "ui_cmds"])
+    subscriptions = ManySubscriptionConfig(default=["tag_values"])
     schedule = ScheduleConfig(
         description=(
             "Optional cron/rate schedule. Only needed if at least one mapping "

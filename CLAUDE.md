@@ -39,8 +39,6 @@ No Dockerfile: processors are Lambda-zipped, not containerised.
   context)`.
 - Class-level declarative config: subclass `config.Schema`, and for nested
   objects subclass `config.Object` (e.g. `MappingObject`, `UIConfig`).
-- `@ui.handler(re.compile(r"..."))` accepts regex patterns — used here to
-  dispatch per-mapping write-back commands from the UI.
 - Dynamic UI: override `ui.UI.setup` and call `self.add_element(...)`. This
   sets `is_static = False`, which makes the processor republish the UI
   schema on every invocation.
@@ -63,8 +61,8 @@ So Tag Relay writes *two* tag values per relay:
    `mirror_<slug>` key, used solely as the UI binding target.
 
 `names.py` is the single source of truth for how slugs are derived
-(`sha1(f"{dest_app}/{dest_tag}")[:8]`). Mirror tags, writeback command names,
-and UI variable names all share that slug.
+(`sha1(f"{dest_app}/{dest_tag}")[:8]`). Mirror tag keys and UI variable
+names share that slug.
 
 ## Filters
 

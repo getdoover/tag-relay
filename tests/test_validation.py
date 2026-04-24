@@ -11,11 +11,11 @@ from tag_relay.validation import (
 )
 
 
-def _mapping(source_app, source_tag, dest_app, dest_tag):
-    """Build a duck-typed mapping matching what pydoover's Object produces.
+SELF_KEY = "tag_relay_self"
 
-    Each field exposes a ``.value`` attribute, matching the config element API.
-    """
+
+def _mapping(source_app, source_tag, dest_app, dest_tag):
+    """Duck-typed mapping matching pydoover's Object .value accessor."""
     return SimpleNamespace(
         source_app_key=SimpleNamespace(value=source_app),
         source_tag_name=SimpleNamespace(value=source_tag),
@@ -32,7 +32,7 @@ def test_partition_passes_through_valid_mappings():
         _mapping("app_a", "x", "app_b", "y"),
         _mapping("app_b", "y", "app_c", "z"),
     ]
-    valid, rejected = partition_mappings(mappings)
+    valid, rejected = partition_mappings(mappings, SELF_KEY)
     assert valid == mappings
     assert rejected == []
 
@@ -40,35 +40,52 @@ def test_partition_passes_through_valid_mappings():
 def test_partition_rejects_identity_loop():
     same_tag = _mapping("app_a", "x", "app_a", "x")
     other = _mapping("app_a", "x", "app_b", "y")
-    valid, rejected = partition_mappings([same_tag, other])
+    valid, rejected = partition_mappings([same_tag, other], SELF_KEY)
     assert valid == [other]
     assert rejected == [same_tag]
 
 
-def test_partition_rejects_missing_fields():
+def test_partition_rejects_missing_required_fields():
     missing_source_app = _mapping("", "x", "app_b", "y")
     missing_source_tag = _mapping("app_a", "", "app_b", "y")
-    missing_dest_app = _mapping("app_a", "x", "", "y")
     missing_dest_tag = _mapping("app_a", "x", "app_b", "")
-    none_field = _mapping(None, "x", "app_b", "y")
+    none_source_app = _mapping(None, "x", "app_b", "y")
     all_missing = [
         missing_source_app,
         missing_source_tag,
-        missing_dest_app,
         missing_dest_tag,
-        none_field,
+        none_source_app,
     ]
     good = _mapping("app_a", "x", "app_b", "y")
 
-    valid, rejected = partition_mappings(all_missing + [good])
+    valid, rejected = partition_mappings(all_missing + [good], SELF_KEY)
     assert valid == [good]
     assert rejected == all_missing
 
 
+def test_blank_dest_app_coalesces_to_self():
+    # Blank dest_app means "write to the Tag Relay itself".
+    m = _mapping("app_a", "x", "", "y")
+    valid, rejected = partition_mappings([m], SELF_KEY)
+    assert valid == [m]
+    assert rejected == []
+    _src, dst = endpoints(m, SELF_KEY)
+    assert dst == (SELF_KEY, "y")
+
+
+def test_blank_dest_app_identity_loop_is_rejected():
+    # Source is on the Tag Relay itself; dest_app blank → also the Tag Relay.
+    # Same tag name on both sides → identity loop.
+    m = _mapping(SELF_KEY, "x", "", "x")
+    valid, rejected = partition_mappings([m], SELF_KEY)
+    assert valid == []
+    assert rejected == [m]
+
+
 def test_identity_loop_allowed_when_app_same_but_tag_differs():
-    # Same app, different tag — legitimate, not a loop.
+    # Same app, different tag — legitimate transform-in-place, not a loop.
     inside_same_app = _mapping("app_a", "raw", "app_a", "cooked")
-    valid, rejected = partition_mappings([inside_same_app])
+    valid, rejected = partition_mappings([inside_same_app], SELF_KEY)
     assert valid == [inside_same_app]
     assert rejected == []
 
@@ -77,12 +94,11 @@ def test_identity_loop_allowed_when_app_same_but_tag_differs():
 
 
 def test_no_cycles_in_linear_chain():
-    # a.x -> b.y -> c.z
     mappings = [
         _mapping("a", "x", "b", "y"),
         _mapping("b", "y", "c", "z"),
     ]
-    assert find_cycles(mappings) == []
+    assert find_cycles(mappings, SELF_KEY) == []
 
 
 def test_detects_two_node_cycle():
@@ -90,9 +106,8 @@ def test_detects_two_node_cycle():
         _mapping("a", "x", "b", "y"),
         _mapping("b", "y", "a", "x"),
     ]
-    cycles = find_cycles(mappings)
+    cycles = find_cycles(mappings, SELF_KEY)
     assert len(cycles) == 1
-    # Cycle rendered as A -> B -> A or B -> A -> B depending on DFS entry point
     rendered = describe_cycle(cycles[0])
     assert rendered in ("a.x -> b.y -> a.x", "b.y -> a.x -> b.y")
 
@@ -103,30 +118,41 @@ def test_detects_three_node_cycle():
         _mapping("b", "y", "c", "z"),
         _mapping("c", "z", "a", "x"),
     ]
-    cycles = find_cycles(mappings)
+    cycles = find_cycles(mappings, SELF_KEY)
     assert len(cycles) == 1
-    nodes = [node for node in cycles[0][:-1]]  # drop repeated tail node
+    nodes = cycles[0][:-1]
     assert set(nodes) == {("a", "x"), ("b", "y"), ("c", "z")}
 
 
+def test_cycle_through_blank_dest_resolves_to_self():
+    # a.x -> self.y (blank dest_app) -> a.x
+    mappings = [
+        _mapping("a", "x", "", "y"),
+        _mapping(SELF_KEY, "y", "a", "x"),
+    ]
+    cycles = find_cycles(mappings, SELF_KEY)
+    assert len(cycles) == 1
+    nodes = cycles[0][:-1]
+    assert set(nodes) == {("a", "x"), (SELF_KEY, "y")}
+
+
 def test_cycle_detection_tolerates_extra_linear_tail():
-    # b.y is in a cycle with a.x, and also branches out to an unrelated dest.
     mappings = [
         _mapping("a", "x", "b", "y"),
         _mapping("b", "y", "a", "x"),
         _mapping("b", "y", "c", "z"),  # non-cyclic extra edge
     ]
-    cycles = find_cycles(mappings)
+    cycles = find_cycles(mappings, SELF_KEY)
     assert len(cycles) == 1
 
 
-def test_describe_mapping():
-    m = _mapping("tracker", "run_hours", "display", "hours")
-    assert describe_mapping(m) == "tracker.run_hours -> display.hours"
+def test_describe_mapping_includes_resolved_dest():
+    m = _mapping("tracker", "run_hours", "", "hours")
+    assert describe_mapping(m, SELF_KEY) == f"tracker.run_hours -> {SELF_KEY}.hours"
 
 
-def test_endpoints_returns_tuples():
+def test_endpoints_returns_resolved_tuples():
     m = _mapping("a", "x", "b", "y")
-    src, dst = endpoints(m)
+    src, dst = endpoints(m, SELF_KEY)
     assert src == ("a", "x")
     assert dst == ("b", "y")

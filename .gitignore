@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Lambda build artifacts (doover app publish)
+packages_export/
+package.zip
+requirements.txt
+
 # C extensions
 *.so
 

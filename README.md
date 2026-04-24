@@ -44,7 +44,7 @@ Each **Mapping**:
 |-------|---------|
 | **Source App** | Installed app whose tag is being relayed. |
 | **Source Tag** | Tag name on the source app. |
-| **Destination App** | Installed app to write into. |
+| **Destination App** | Installed app to write into. Leave blank to write into the Tag Relay app itself. |
 | **Destination Tag** | Tag name to write on the destination. |
 | **Transform (CEL)** | Optional. Expression applied to the source value (bound as `x`). |
 | **Trigger** | `event` (default) or `schedule`. |
@@ -62,11 +62,21 @@ Examples:
 
 ```
 x                          # identity (equivalent to leaving transform empty)
-x * 1000                   # scale
-double(x) * 1.8 + 32       # Celsius → Fahrenheit
+x * 0.5 + 10               # linear transform (y = m*x + b) — scale by 0.5, offset +10
+x * 1000                   # unit scale — stays in int space
+x * 1.8 + 32               # Celsius → Fahrenheit
 x > 10                     # threshold to boolean
 int(x / 100)               # truncating division
 ```
+
+**Int/float coercion.** CEL itself rejects mixed int/double arithmetic
+(`Int(25) * Float(1.8)` is an error). The relay smooths this over: if the
+expression contains **any** numeric literal with a decimal point (e.g.
+`0.5`, `1.8`, `0.002442`), every integer literal in the expression and the
+input `x` are auto-promoted to double before evaluation. Expressions with
+no decimal literals — `x * 1000`, `x + 1` — stay in integer space and
+preserve int semantics. You shouldn't need `double(x)` in typical linear
+transforms.
 
 **Gotcha:** CEL is strict about mixed int/float arithmetic. If `x` arrives as
 an int and the expression has a float literal, cast with `double(x)` first.
@@ -87,13 +97,11 @@ same run continue.
 
 ## UI
 
-Each mapping can opt in to a UI card on the Tag Relay app:
+Each mapping can opt in to a read-only variable on the Tag Relay app card:
 
 - Numeric, boolean, or text variable types
-- Numeric variables support decimal precision, units, and coloured ranges
-- Optional write-back control (`float_input`, `text_input`, `boolean`) — user
-  input is written **directly** to the destination tag, bypassing the CEL
-  transform (since transforms are one-way source→dest)
+- Numeric variables support decimal precision, units, coloured ranges, and an
+  optional `linear` or `radial` gauge rendering
 
 The UI is rendered on the Tag Relay's own app card, not injected into the
 destination app's card. It references a mirror tag that the processor writes
