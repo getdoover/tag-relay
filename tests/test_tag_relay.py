@@ -4,7 +4,11 @@ import pytest
 
 from tag_relay import handler
 from tag_relay.app_config import TagRelayConfig, MappingObject, UIConfig
-from tag_relay.application import TagRelayApplication, _tag_in_diff
+from tag_relay.application import (
+    TagRelayApplication,
+    _diff_from_event,
+    _tag_in_diff,
+)
 from tag_relay.names import (
     mirror_key_for,
     variable_name_for,
@@ -110,6 +114,62 @@ def test_tag_in_diff_rejects_missing_fields():
     assert _tag_in_diff(diff, "source_app_1", "other_tag") is False
     assert _tag_in_diff({}, "source_app_1", "my_tag") is False
     assert _tag_in_diff(diff, "", "my_tag") is False
+
+
+# --- event diff extraction ----------------------------------------------
+
+
+class _FakeChannel:
+    def __init__(self, name):
+        self.name = name
+
+
+class _FakeAggregate:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeMessage:
+    def __init__(self, channel, data):
+        self.channel = channel
+        self.data = data
+
+
+def _aggregate_event(channel_name, data):
+    from pydoover.models import AggregateUpdateEvent
+
+    ev = AggregateUpdateEvent.__new__(AggregateUpdateEvent)
+    ev.channel = _FakeChannel(channel_name)
+    ev.request_data = _FakeAggregate(data)
+    return ev
+
+
+def _message_event(channel_name, data):
+    from pydoover.models import MessageCreateEvent
+
+    ev = MessageCreateEvent.__new__(MessageCreateEvent)
+    ev.channel = _FakeChannel(channel_name)
+    ev.message = _FakeMessage(_FakeChannel(channel_name), data)
+    return ev
+
+
+def test_diff_from_event_extracts_aggregate_request_data():
+    payload = {"src": {"x": 1}}
+    assert _diff_from_event(_aggregate_event("tag_values", payload)) == payload
+
+
+def test_diff_from_event_extracts_message_data():
+    payload = {"src": {"x": 2}}
+    assert _diff_from_event(_message_event("tag_values", payload)) == payload
+
+
+def test_diff_from_event_returns_none_for_non_tag_values_channel():
+    assert _diff_from_event(_aggregate_event("ui_state", {"foo": 1})) is None
+    assert _diff_from_event(_message_event("ui_cmds", {"foo": 1})) is None
+
+
+def test_diff_from_event_returns_none_for_unknown_event_type():
+    assert _diff_from_event(object()) is None
 
 
 # --- transforms ---------------------------------------------------------

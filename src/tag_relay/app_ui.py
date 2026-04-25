@@ -33,19 +33,38 @@ class TagRelayUI(ui.UI):
     async def setup(self):
         # Skip invalid mappings silently — Application.setup logs the reject.
         valid, _ = partition_mappings(self.config.mappings.elements, self.app_key)
-        for mapping in valid:
-            ui_cfg = mapping.ui
-            if not ui_cfg.enabled.value:
-                continue
+        ui_mappings = [m for m in valid if m.ui.enabled.value]
 
+        # Resolve variable names: prefer dest_tag, fall back to slug only when
+        # two UI-enabled mappings would collide on the same name.
+        dest_tag_counts: dict[str, int] = {}
+        for m in ui_mappings:
+            _src, (_dest_app, dest_tag) = endpoints(m, self.app_key)
+            dest_tag_counts[dest_tag] = dest_tag_counts.get(dest_tag, 0) + 1
+
+        for mapping in ui_mappings:
+            ui_cfg = mapping.ui
             _src, (dest_app, dest_tag) = endpoints(mapping, self.app_key)
 
             variable_type = ui_cfg.variable_type.value or "numeric"
-            display_name = ui_cfg.display_name.value or f"{dest_app}.{dest_tag}"
-            var_name = variable_name_for(dest_app, dest_tag)
+            display_name = ui_cfg.display_name.value or dest_tag
+
+            # When dest is on this same app, the destination tag itself is
+            # what the UI binds to. Cross-app destinations need a mirror tag
+            # written into self's subtree because the UI can't reference
+            # another app's tags directly.
+            if dest_app == self.app_key:
+                binding_tag = dest_tag
+            else:
+                binding_tag = mirror_key_for(dest_app, dest_tag)
+
+            if dest_tag_counts[dest_tag] == 1:
+                var_name = dest_tag
+            else:
+                var_name = variable_name_for(dest_app, dest_tag)
 
             binding = UITagBinding(
-                tag_name=mirror_key_for(dest_app, dest_tag),
+                tag_name=binding_tag,
                 tag_type=_tag_type_for_variable(variable_type),
                 app_nested=True,
             )
@@ -73,6 +92,8 @@ class TagRelayUI(ui.UI):
         kwargs = {"name": name, "value": binding}
         if ui_cfg.precision.value is not None:
             kwargs["precision"] = ui_cfg.precision.value
+        if ui_cfg.units.value:
+            kwargs["units"] = ui_cfg.units.value
         ranges = _build_ranges(ui_cfg.ranges)
         if ranges:
             kwargs["ranges"] = ranges
