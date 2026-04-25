@@ -166,3 +166,24 @@ def test_transform_integer_literals_inside_functions_still_coerced():
     # Bare integer literal inside a float expression -> promoted to double.
     cache = TransformCache()
     assert cache.evaluate("(x + 100) * 0.5", 4) == pytest.approx(52.0)
+
+
+def test_transform_coerces_x_when_expression_has_only_float_literals():
+    # Regression: when the expression has float literals but no int literals
+    # to rewrite, re.sub returns the same string object. We must still cast
+    # an int x to float — the previous identity-check bug skipped that.
+    cache = TransformCache()
+    assert cache.evaluate("(x - 1638.4) / 6553.6 * 5.0", 5874) == pytest.approx(
+        (5874 - 1638.4) / 6553.6 * 5.0
+    )
+
+
+def test_transform_supports_conditional_with_null_returns():
+    # Mirrors the kind of clamp users write for analog inputs.
+    cache = TransformCache()
+    expr = "x == null || x < 1556.48 ? null : (x - 1638.4) / 6553.6 * 5.0"
+    assert cache.evaluate(expr, 5874) == pytest.approx(
+        (5874 - 1638.4) / 6553.6 * 5.0
+    )
+    # Below threshold -> null
+    assert cache.evaluate(expr, 1000) is None

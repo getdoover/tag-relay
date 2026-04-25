@@ -39,11 +39,19 @@ _FLOAT_LITERAL_RE = re.compile(r"\b\d+\.\d+|\b\d+[eE][-+]?\d+")
 _INT_LITERAL_RE = re.compile(r"(?<![\w.])(\d+)(?![\w.])")
 
 
-def _normalise_for_double(expression: str) -> str:
-    """If the expression contains any float literal, promote bare ints to floats."""
+def _normalise_for_double(expression: str) -> tuple[str, bool]:
+    """Promote bare int literals to floats when the expression mixes float math.
+
+    Returns ``(normalised_expression, in_double_mode)``. ``in_double_mode`` is
+    True iff the expression contains at least one float literal — meaning any
+    integer ``x`` should also be cast to double before evaluation. Note we
+    can't use object-identity on the returned string to detect "we touched
+    it"; if the expression already only contains float literals, ``re.sub``
+    returns the same string, but we still need to cast ``x``.
+    """
     if not _FLOAT_LITERAL_RE.search(expression):
-        return expression
-    return _INT_LITERAL_RE.sub(r"\1.0", expression)
+        return expression, False
+    return _INT_LITERAL_RE.sub(r"\1.0", expression), True
 
 
 class TransformCache:
@@ -54,7 +62,7 @@ class TransformCache:
         if not expression:
             return x
 
-        normalised = _normalise_for_double(expression)
+        normalised, in_double_mode = _normalise_for_double(expression)
         program = self._programs.get(normalised)
         if program is None:
             try:
@@ -65,10 +73,11 @@ class TransformCache:
                 ) from e
             self._programs[normalised] = program
 
-        # Cast int -> float only when the expression has been normalised for
-        # double math (otherwise pure-int expressions stay in int space).
-        # Keep booleans as bool (bool is a subclass of int in Python).
-        if normalised is not expression and type(x) is int:
+        # Cast int -> float only when the expression mixes float math
+        # (otherwise pure-int expressions stay in int space). Keep booleans
+        # as bool (bool is a subclass of int in Python — type() check is
+        # strict and excludes it).
+        if in_double_mode and type(x) is int:
             x = float(x)
 
         try:
